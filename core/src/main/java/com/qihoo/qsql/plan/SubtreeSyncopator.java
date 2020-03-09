@@ -3,6 +3,51 @@ package com.qihoo.qsql.plan;
 import com.google.common.collect.ImmutableList;
 import com.qihoo.qsql.api.SqlRunner.Builder;
 import com.qihoo.qsql.api.SqlRunner.Builder.RunnerType;
+import com.qihoo.qsql.org.apache.calcite.adapter.druid.DruidQuery;
+import com.qihoo.qsql.org.apache.calcite.adapter.elasticsearch.ElasticsearchTable;
+import com.qihoo.qsql.org.apache.calcite.adapter.elasticsearch.ElasticsearchTranslatableTable;
+import com.qihoo.qsql.org.apache.calcite.adapter.mongodb.MongoTable;
+import com.qihoo.qsql.org.apache.calcite.adapter.virtual.VirtualTable;
+import com.qihoo.qsql.org.apache.calcite.adapter.virtual.VirtualTypeSystem;
+import com.qihoo.qsql.org.apache.calcite.plan.RelOptCluster;
+import com.qihoo.qsql.org.apache.calcite.plan.RelOptTable;
+import com.qihoo.qsql.org.apache.calcite.plan.RelTraitSet;
+import com.qihoo.qsql.org.apache.calcite.prepare.RelOptTableImpl;
+import com.qihoo.qsql.org.apache.calcite.rel.RelNode;
+import com.qihoo.qsql.org.apache.calcite.rel.RelShuttleImpl;
+import com.qihoo.qsql.org.apache.calcite.rel.core.Project;
+import com.qihoo.qsql.org.apache.calcite.rel.core.TableScan;
+import com.qihoo.qsql.org.apache.calcite.rel.core.Values;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalAggregate;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalCorrelate;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalFilter;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalIntersect;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalJoin;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalMatch;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalProject;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalSort;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalUnion;
+import com.qihoo.qsql.org.apache.calcite.rel.logical.LogicalValues;
+import com.qihoo.qsql.org.apache.calcite.rel.type.RelDataType;
+import com.qihoo.qsql.org.apache.calcite.rel.type.RelDataTypeField;
+import com.qihoo.qsql.org.apache.calcite.rel.type.RelDataTypeFieldImpl;
+import com.qihoo.qsql.org.apache.calcite.rel.type.RelDataTypeSystem;
+import com.qihoo.qsql.org.apache.calcite.rel.type.RelRecordType;
+import com.qihoo.qsql.org.apache.calcite.rex.RexCall;
+import com.qihoo.qsql.org.apache.calcite.rex.RexCorrelVariable;
+import com.qihoo.qsql.org.apache.calcite.rex.RexFieldAccess;
+import com.qihoo.qsql.org.apache.calcite.rex.RexInputRef;
+import com.qihoo.qsql.org.apache.calcite.rex.RexLiteral;
+import com.qihoo.qsql.org.apache.calcite.rex.RexLocalRef;
+import com.qihoo.qsql.org.apache.calcite.rex.RexNode;
+import com.qihoo.qsql.org.apache.calcite.rex.RexPatternFieldRef;
+import com.qihoo.qsql.org.apache.calcite.rex.RexSubQuery;
+import com.qihoo.qsql.org.apache.calcite.rex.RexTableInputRef;
+import com.qihoo.qsql.org.apache.calcite.rex.RexVisitorImpl;
+import com.qihoo.qsql.org.apache.calcite.schema.Table;
+import com.qihoo.qsql.org.apache.calcite.schema.TranslatableTable;
+import com.qihoo.qsql.org.apache.calcite.sql.type.BasicSqlType;
+import com.qihoo.qsql.org.apache.calcite.sql.type.SqlTypeName;
 import com.qihoo.qsql.plan.func.DataSourceFuncTable;
 import com.qihoo.qsql.plan.func.SqlRunnerFuncTable;
 import java.util.AbstractMap;
@@ -11,49 +56,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import org.apache.calcite.adapter.druid.DruidQuery;
-import org.apache.calcite.adapter.elasticsearch.ElasticsearchTable;
-import org.apache.calcite.adapter.elasticsearch.ElasticsearchTranslatableTable;
-import org.apache.calcite.adapter.virtual.VirtualTable;
-import org.apache.calcite.adapter.virtual.VirtualTypeSystem;
-import org.apache.calcite.plan.RelOptCluster;
-import org.apache.calcite.plan.RelOptTable;
-import org.apache.calcite.plan.RelTraitSet;
-import org.apache.calcite.prepare.RelOptTableImpl;
-import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.RelShuttleImpl;
-import org.apache.calcite.rel.core.Project;
-import org.apache.calcite.rel.core.TableScan;
-import org.apache.calcite.rel.core.Values;
-import org.apache.calcite.rel.logical.LogicalAggregate;
-import org.apache.calcite.rel.logical.LogicalFilter;
-import org.apache.calcite.rel.logical.LogicalIntersect;
-import org.apache.calcite.rel.logical.LogicalJoin;
-import org.apache.calcite.rel.logical.LogicalMatch;
-import org.apache.calcite.rel.logical.LogicalProject;
-import org.apache.calcite.rel.logical.LogicalSort;
-import org.apache.calcite.rel.logical.LogicalUnion;
-import org.apache.calcite.rel.logical.LogicalValues;
-import org.apache.calcite.rel.type.RelDataType;
-import org.apache.calcite.rel.type.RelDataTypeField;
-import org.apache.calcite.rel.type.RelDataTypeFieldImpl;
-import org.apache.calcite.rel.type.RelDataTypeSystem;
-import org.apache.calcite.rel.type.RelRecordType;
-import org.apache.calcite.rex.RexCall;
-import org.apache.calcite.rex.RexCorrelVariable;
-import org.apache.calcite.rex.RexFieldAccess;
-import org.apache.calcite.rex.RexInputRef;
-import org.apache.calcite.rex.RexLiteral;
-import org.apache.calcite.rex.RexLocalRef;
-import org.apache.calcite.rex.RexNode;
-import org.apache.calcite.rex.RexPatternFieldRef;
-import org.apache.calcite.rex.RexSubQuery;
-import org.apache.calcite.rex.RexTableInputRef;
-import org.apache.calcite.rex.RexVisitorImpl;
-import org.apache.calcite.schema.Table;
-import org.apache.calcite.schema.TranslatableTable;
-import org.apache.calcite.sql.type.BasicSqlType;
-import org.apache.calcite.sql.type.SqlTypeName;
 
 /**
  * Travel the whole {@link RelNode} of SQL line, cut it based on a algorithm and return the final sub-trees and their
@@ -110,8 +112,9 @@ public class SubtreeSyncopator extends RelShuttleImpl {
 
         RelNode tableScan = project.getInput().accept(this);
 
-        if (! isValues(tableScan)) {
+        if (!isValues(tableScan)) {
             return neededToPullUpFunctions(project, project.getChildExps(), castTableScan(tableScan))
+                || commonNeededToSyncopate(project, castTableScan(tableScan))
                 ? new MixedTableScan(castTableScan(tableScan)) : tableScan;
         }
         return tableScan;
@@ -126,7 +129,7 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     public RelNode visit(LogicalAggregate aggregate) {
         RelNode scan = aggregate.getInput().accept(this);
         //change to rule
-        if (! isValues(scan)) {
+        if (!isValues(scan)) {
             return neededToSyncopate(aggregate, castTableScan(scan))
                 ? new MixedTableScan(castTableScan(scan)) : scan;
         }
@@ -142,9 +145,9 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     @Override
     public RelNode visit(LogicalFilter filter) {
         RelNode tableScan = filter.getInput().accept(this);
-
-        if (! isValues(tableScan)) {
+        if (!isValues(tableScan)) {
             return neededToPullUpFunctions(filter, filter.getChildExps(), castTableScan(tableScan))
+                || commonNeededToSyncopate(filter, castTableScan(tableScan))
                 ? new MixedTableScan(castTableScan(tableScan)) : tableScan;
         }
         return tableScan;
@@ -163,11 +166,16 @@ public class SubtreeSyncopator extends RelShuttleImpl {
         return values;
     }
 
+    @Override
+    public RelNode visit(LogicalCorrelate correlate) {
+        return completeLogicalTree(correlate);
+    }
+
     private RelNode completeLogicalTree(RelNode binaryNode) {
         RelNode left = binaryNode.getInputs().get(0).accept(this);
         RelNode right = binaryNode.getInputs().get(1).accept(this);
 
-        if (! isValues(left) && ! isValues(right)) {
+        if (!isValues(left) && !isValues(right)) {
             return neededToSyncopate(binaryNode, castTableScan(left), castTableScan(right))
                 ? new MixedTableScan(castTableScan(left)) : left;
         }
@@ -177,8 +185,8 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     }
 
     private boolean neededToSyncopate(RelNode parent,
-        TableScan left,
-        TableScan right) {
+                                      TableScan left,
+                                      TableScan right) {
         if (left instanceof MixedTableScan && right instanceof MixedTableScan) {
             return false;
         }
@@ -192,7 +200,6 @@ public class SubtreeSyncopator extends RelShuttleImpl {
             pruneSubtree(parent, left, 0);
             return true;
         }
-
         if (shouldBeDivided(left.getTable(), right.getTable())) {
             pruneSubtree(parent, left, 0);
             pruneSubtree(parent, right, 1);
@@ -218,8 +225,25 @@ public class SubtreeSyncopator extends RelShuttleImpl {
         return false;
     }
 
+    /**
+     * no need prune sql query logic and sink to corresponding datasource.
+     * directly prune sub-query sql of corresponding database from mix query sql
+     */
+    private boolean commonNeededToSyncopate(RelNode parent, TableScan single) {
+        if (single instanceof MixedTableScan) {
+            return false;
+        }
+
+        RelOptTableImpl singleImpl = ((RelOptTableImpl) single.getTable());
+        if (singleImpl.getTable() instanceof MongoTable) {
+            pruneSubtree(parent, single, 0);
+            return true;
+        }
+        return false;
+    }
+
     private boolean neededToPullUpFunctions(RelNode parent,
-        List<RexNode> rexNodes, TableScan single) {
+                                            List<RexNode> rexNodes, TableScan single) {
         if (single instanceof MixedTableScan) {
             return false;
         }
@@ -229,7 +253,7 @@ public class SubtreeSyncopator extends RelShuttleImpl {
 
         //JDBC op table contains all of functions, so it will be executed directly
         //Dynamic op table needs to judge if func not exists in related table
-        if (rexNodes.stream().anyMatch(rexNode -> ! rexNode.accept(checker))) {
+        if (rexNodes.stream().anyMatch(rexNode -> !rexNode.accept(checker))) {
             pruneSubtree(parent, single, 0);
             if (Objects.isNull(builder)) {
                 throw new RuntimeException("Need a builder to hold runner.");
@@ -254,17 +278,17 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     }
 
     private boolean isDiffFromEachOther(Table left, Table right) {
-        return isDiffClassFromEachOther(left, right) || ! (left instanceof TranslatableTable)
-            || ! (right instanceof TranslatableTable) || isDiffDbFromEachOther((TranslatableTable) left,
+        return isDiffClassFromEachOther(left, right) || !(left instanceof TranslatableTable)
+            || !(right instanceof TranslatableTable) || isDiffDbFromEachOther((TranslatableTable) left,
             (TranslatableTable) right);
     }
 
     private boolean isDiffClassFromEachOther(Table left, Table right) {
-        return ! left.getClass().equals(right.getClass());
+        return !left.getClass().equals(right.getClass());
     }
 
     private boolean isDiffDbFromEachOther(TranslatableTable left, TranslatableTable right) {
-        return ! left.getBaseName().toLowerCase().equals(right.getBaseName().toLowerCase());
+        return !left.getBaseName().toLowerCase().equals(right.getBaseName().toLowerCase());
     }
 
     private boolean notSupportedBinOp(Table left, Table right) {
@@ -275,8 +299,8 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     }
 
     private void executePruningSubtree(RelNode secondLevelNode,
-        RelOptTable table,
-        String tempTableName) {
+                                       RelOptTable table,
+                                       String tempTableName) {
         Project newProject = LogicalProject.create(
             secondLevelNode,
             secondLevelNode
@@ -308,7 +332,7 @@ public class SubtreeSyncopator extends RelShuttleImpl {
 
     private Boolean containsTable(RelNode relNode) {
         return (relNode instanceof TableScan
-            && ! ((TableScan) relNode).getClass().equals(MixedTableScan.class))
+            && !((TableScan) relNode).getClass().equals(MixedTableScan.class))
             || isDruidQuery(relNode);
     }
 
@@ -407,10 +431,10 @@ public class SubtreeSyncopator extends RelShuttleImpl {
     }
 
     private TableScan createTemporaryTableScan(RelOptTableImpl relOptTable,
-        List<String> tableAlias,
-        RelOptCluster cluster,
-        RelTraitSet traitSet,
-        RelNode originTable) {
+                                               List<String> tableAlias,
+                                               RelOptCluster cluster,
+                                               RelTraitSet traitSet,
+                                               RelNode originTable) {
         RelDataType type = originTable.getRowType();
 
         RelOptTableImpl relOptTableWithAlias = relOptTable.modifyTableName(tableAlias);

@@ -2,47 +2,51 @@ package com.qihoo.qsql.plan;
 
 import com.qihoo.qsql.exception.ParseException;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
-import org.apache.calcite.sql.SqlAsOperator;
-import org.apache.calcite.sql.SqlBasicCall;
-import org.apache.calcite.sql.SqlCall;
-import org.apache.calcite.sql.SqlDataTypeSpec;
-import org.apache.calcite.sql.SqlDynamicParam;
-import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlIntervalQualifier;
-import org.apache.calcite.sql.SqlJoin;
-import org.apache.calcite.sql.SqlLiteral;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.SqlNodeList;
-import org.apache.calcite.sql.SqlOrderBy;
-import org.apache.calcite.sql.SqlSelect;
-import org.apache.calcite.sql.ext.SqlInsertOutput;
-import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.sql.util.SqlVisitor;
-import org.apache.calcite.sql.validate.SqlConformance;
-import org.apache.calcite.sql.validate.SqlConformanceEnum;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlAsOperator;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlBasicCall;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlCall;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlDataTypeSpec;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlDynamicParam;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlIdentifier;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlIntervalQualifier;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlJoin;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlLiteral;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlNode;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlNodeList;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlOrderBy;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlSelect;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlWith;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlWithItem;
+import com.qihoo.qsql.org.apache.calcite.sql.ext.SqlInsertOutput;
+import com.qihoo.qsql.org.apache.calcite.sql.parser.SqlParseException;
+import com.qihoo.qsql.org.apache.calcite.sql.parser.SqlParser;
+import com.qihoo.qsql.org.apache.calcite.sql.util.SqlVisitor;
+import com.qihoo.qsql.org.apache.calcite.sql.validate.SqlConformance;
+import com.qihoo.qsql.org.apache.calcite.sql.validate.SqlConformanceEnum;
 
 /**
  * Parse SQL line and extract the table name in it.
  */
 public class TableNameCollector implements SqlVisitor<QueryTables> {
 
+    private Set<String> withTempTables = new HashSet<>();
     private QueryTables tableNames = new QueryTables();
     //TODO extract SqlParser to correspond with calcite-core
     private SqlConformance conformance = SqlConformanceEnum.MYSQL_5;
     private Quoting quoting = Quoting.BACK_TICK;
 
     private SqlParser.Config config = SqlParser
-        .configBuilder()
-        .setConformance(conformance)
-        .setQuoting(quoting)
-        .setQuotedCasing(Casing.UNCHANGED)
-        .setUnquotedCasing(Casing.UNCHANGED)
-        .setCaseSensitive(true)
-        .build();
+            .configBuilder()
+            .setConformance(conformance)
+            .setQuoting(quoting)
+            .setQuotedCasing(Casing.UNCHANGED)
+            .setUnquotedCasing(Casing.UNCHANGED)
+            .build();
 
     /**
      * Get table names from sql.
@@ -75,13 +79,18 @@ public class TableNameCollector implements SqlVisitor<QueryTables> {
             }
             if (((SqlSelect) sqlCall).getWhere() instanceof SqlBasicCall) {
                 List<SqlNode> operands =
-                    ((SqlBasicCall) ((SqlSelect) sqlCall).getWhere()).getOperandList();
+                        ((SqlBasicCall) ((SqlSelect) sqlCall).getWhere()).getOperandList();
                 for (SqlNode operand : operands) {
-                    if (! (operand instanceof SqlIdentifier)) {
+                    if (!(operand instanceof SqlIdentifier)) {
                         operand.accept(this);
                     }
                 }
             }
+        }
+
+        if (sqlCall instanceof SqlWith) {
+            ((SqlWith) sqlCall).withList.accept(this);
+            ((SqlWith) sqlCall).body.accept(this);
         }
 
         if (sqlCall instanceof SqlJoin) {
@@ -105,10 +114,17 @@ public class TableNameCollector implements SqlVisitor<QueryTables> {
         sqlNodeList.iterator().forEachRemaining((entry) -> {
             if (entry instanceof SqlSelect) {
                 entry.accept(this);
+            } else if (entry instanceof SqlWithItem) {
+                //TODO caution db.table query
+                List<String> names = ((SqlWithItem) entry).name.names;
+                if (!names.isEmpty()) {
+                    withTempTables.add(names.get(names.size() - 1));
+                }
+                ((SqlWithItem) entry).query.accept(this);
             } else if (entry instanceof SqlBasicCall) {
                 String kind = ((SqlBasicCall) entry).getOperator().getName();
                 if ("AS".equalsIgnoreCase(kind)
-                    && ((SqlBasicCall) entry).operand(0) instanceof SqlSelect) {
+                        && ((SqlBasicCall) entry).operand(0) instanceof SqlSelect) {
                     entry.accept(this);
                 }
             }
@@ -144,9 +160,9 @@ public class TableNameCollector implements SqlVisitor<QueryTables> {
     private void visitBasicCall(SqlBasicCall sqlCall) {
         if (sqlCall.getOperator() instanceof SqlAsOperator && (sqlCall).operands.length == 2) {
             if ((sqlCall).operands[0] instanceof SqlIdentifier
-                && (sqlCall).operands[1] instanceof SqlIdentifier) {
+                    && (sqlCall).operands[1] instanceof SqlIdentifier) {
                 (sqlCall).operands[0].accept(this);
-            } else if (! ((sqlCall).operands[0] instanceof SqlIdentifier)) {
+            } else if (!((sqlCall).operands[0] instanceof SqlIdentifier)) {
                 (sqlCall).operands[0].accept(this);
             }
         } else {
@@ -166,11 +182,21 @@ public class TableNameCollector implements SqlVisitor<QueryTables> {
 
     private QueryTables validateTableName(QueryTables tableNames) {
         for (String tableName : tableNames.tableNames) {
-            if (tableName.split("\\.", - 1).length > 2) {
+            if (tableName.split("\\.", -1).length > 2) {
                 throw new ParseException("Qsql only support structure like dbName.tableName,"
-                    + " and there is a unsupported tableName here: " + tableName);
+                        + " and there is a unsupported tableName here: " + tableName);
             }
         }
+        tableNames.tableNames.removeIf((item) -> withTempTables.contains(item));
         return tableNames;
+    }
+
+    /**
+     * generate SqlNode according sql.
+     */
+    public SqlNode parseSql(String sql) throws SqlParseException {
+        SqlParser parser = SqlParser.create(sql, config);
+        SqlNode sqlNode = parser.parseQuery();
+        return sqlNode;
     }
 }

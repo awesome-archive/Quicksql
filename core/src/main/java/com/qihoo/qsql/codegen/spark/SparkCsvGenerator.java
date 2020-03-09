@@ -30,12 +30,13 @@ public class SparkCsvGenerator extends QueryGenerator {
         String invoked = "spark.read()\n"
             + "            .option(\"header\", \"true\")\n"
             + "            .option(\"inferSchema\", \"true\")\n"
+            + "            .option(\"timestampFormat\", \"yyyy/MM/dd HH:mm:ss ZZ\")\n"
             + "            .option(\"delimiter\", \",\")\n"
             + "            .csv(\"" + StringEscapeUtils.escapeJava(properties.getProperty("directory")) + "\")\n"
             + "            .toDF()\n"
             + "            .createOrReplaceTempView(\"" + properties.getProperty("tableName") + "\");\n"
             + "        \n"
-            + "        tmp = spark.sql(\"" + query.replaceAll("\\.", "_") + "\");";
+            + "      tmp = spark.sql(\"" + query.replaceAll("\\.", "_") + "\");";
         composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE, invoked);
     }
 

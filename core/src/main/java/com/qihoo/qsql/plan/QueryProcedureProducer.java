@@ -3,6 +3,7 @@ package com.qihoo.qsql.plan;
 import com.qihoo.qsql.api.SqlRunner.Builder;
 import com.qihoo.qsql.api.SqlRunner.Builder.RunnerType;
 import com.qihoo.qsql.exception.ParseException;
+import com.qihoo.qsql.org.apache.calcite.adapter.mongodb.MongoTable;
 import com.qihoo.qsql.plan.func.SqlRunnerFuncTable;
 import com.qihoo.qsql.plan.proc.DataSetTransformProcedure;
 import com.qihoo.qsql.plan.proc.DiskLoadProcedure;
@@ -19,28 +20,29 @@ import java.util.List;
 import java.util.Map;
 import org.apache.calcite.avatica.util.Casing;
 import org.apache.calcite.avatica.util.Quoting;
-import org.apache.calcite.model.ModelHandler;
-import org.apache.calcite.plan.RelOptTable;
-import org.apache.calcite.plan.RelTraitDef;
-import org.apache.calcite.plan.hep.HepPlanner;
-import org.apache.calcite.plan.hep.HepProgram;
-import org.apache.calcite.plan.hep.HepProgramBuilder;
-import org.apache.calcite.prepare.RelOptTableImpl;
-import org.apache.calcite.rel.RelNode;
-import org.apache.calcite.rel.rules.SubQueryRemoveRule;
-import org.apache.calcite.schema.SchemaPlus;
-import org.apache.calcite.sql.SqlIdentifier;
-import org.apache.calcite.sql.SqlNode;
-import org.apache.calcite.sql.ext.SqlInsertOutput;
-import org.apache.calcite.sql.parser.SqlParseException;
-import org.apache.calcite.sql.parser.SqlParser;
-import org.apache.calcite.sql.validate.SqlConformanceEnum;
-import org.apache.calcite.sql2rel.SqlToRelConverter;
-import org.apache.calcite.tools.FrameworkConfig;
-import org.apache.calcite.tools.Frameworks;
-import org.apache.calcite.tools.Planner;
-import org.apache.calcite.tools.RelConversionException;
-import org.apache.calcite.tools.ValidationException;
+import com.qihoo.qsql.org.apache.calcite.model.ModelHandler;
+import com.qihoo.qsql.org.apache.calcite.plan.RelOptTable;
+import com.qihoo.qsql.org.apache.calcite.plan.RelTraitDef;
+import com.qihoo.qsql.org.apache.calcite.plan.hep.HepPlanner;
+import com.qihoo.qsql.org.apache.calcite.plan.hep.HepProgram;
+import com.qihoo.qsql.org.apache.calcite.plan.hep.HepProgramBuilder;
+import com.qihoo.qsql.org.apache.calcite.prepare.RelOptTableImpl;
+import com.qihoo.qsql.org.apache.calcite.rel.RelNode;
+import com.qihoo.qsql.org.apache.calcite.rel.rules.FilterJoinRule.JoinConditionPushRule;
+import com.qihoo.qsql.org.apache.calcite.rel.rules.SubQueryRemoveRule;
+import com.qihoo.qsql.org.apache.calcite.schema.SchemaPlus;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlIdentifier;
+import com.qihoo.qsql.org.apache.calcite.sql.SqlNode;
+import com.qihoo.qsql.org.apache.calcite.sql.ext.SqlInsertOutput;
+import com.qihoo.qsql.org.apache.calcite.sql.parser.SqlParseException;
+import com.qihoo.qsql.org.apache.calcite.sql.parser.SqlParser;
+import com.qihoo.qsql.org.apache.calcite.sql.validate.SqlConformanceEnum;
+import com.qihoo.qsql.org.apache.calcite.sql2rel.SqlToRelConverter;
+import com.qihoo.qsql.org.apache.calcite.tools.FrameworkConfig;
+import com.qihoo.qsql.org.apache.calcite.tools.Frameworks;
+import com.qihoo.qsql.org.apache.calcite.tools.Planner;
+import com.qihoo.qsql.org.apache.calcite.tools.RelConversionException;
+import com.qihoo.qsql.org.apache.calcite.tools.ValidationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,12 +110,18 @@ public class QueryProcedureProducer {
                 entry.getValue().getKey(),
                 (output instanceof SqlInsertOutput)
                     ? ((SqlInsertOutput) output).getSelect() : output));
+            //if table is mongo table and set connection information properties to builder object so as to set
+            // parameters when do spark-submit job
+            if (((RelOptTableImpl) entry.getValue().getValue()).getTable() instanceof MongoTable) {
+                builder.setProperties(((MongoTable) ((RelOptTableImpl) entry.getValue().getValue()).getTable())
+                    .getProperties());
+            }
         }
         return new ProcedurePortFire(extractProcedures).optimize();
     }
 
     private LoadProcedure createLoadProcedure() {
-        if (! (output instanceof SqlInsertOutput)) {
+        if (!(output instanceof SqlInsertOutput)) {
             return new MemoryLoadProcedure();
         }
 
@@ -142,7 +150,7 @@ public class QueryProcedureProducer {
         final SqlParser.Config parserConfig = SqlParser.configBuilder()
             .setConformance(SqlConformanceEnum.MYSQL_5)
             .setQuoting(Quoting.BACK_TICK)
-            .setCaseSensitive(true)
+            .setCaseSensitive(false)
             .setUnquotedCasing(Casing.UNCHANGED)
             .build();
 
@@ -173,6 +181,7 @@ public class QueryProcedureProducer {
         } catch (ValidationException | RelConversionException ev) {
             throw new ParseException("Error When Validating: " + ev.getMessage(), ev);
         } catch (Throwable ex) {
+            ex.printStackTrace();
             throw new ParseException(
                 "Unknown Parse Exception, Concrete Message is: " + ex.getMessage(), ex);
         }
@@ -183,6 +192,8 @@ public class QueryProcedureProducer {
             .addRuleInstance(SubQueryRemoveRule.PROJECT)
             .addRuleInstance(SubQueryRemoveRule.FILTER)
             .addRuleInstance(SubQueryRemoveRule.JOIN)
+            .addRuleInstance(JoinConditionPushRule.FILTER_ON_JOIN)
+            .addRuleInstance(JoinConditionPushRule.JOIN)
             .build();
 
         HepPlanner prePlanner = new HepPlanner(program);

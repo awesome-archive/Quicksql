@@ -23,12 +23,12 @@ public class FlinkProcedureVisitor extends ProcedureVisitor {
 
     @Override
     public void visit(ExtractProcedure extractProcedure) {
-        composer.handleComposition(CodeCategory.SENTENCE, "{");
+        composer.handleComposition(CodeCategory.SENTENCE, "");
         QueryGenerator builder = QueryGenerator.getQueryGenerator(
             extractProcedure, composer, false);
         builder.execute();
         builder.saveToTempTable();
-        composer.handleComposition(CodeCategory.SENTENCE, "}");
+        composer.handleComposition(CodeCategory.SENTENCE, "");
         visitNext(extractProcedure);
     }
 
@@ -36,15 +36,16 @@ public class FlinkProcedureVisitor extends ProcedureVisitor {
     @Override
     public void visit(TransformProcedure transformProcedure) {
         composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE,
-            "Table table = tEnv.sqlQuery(\"" + transformProcedure.sql() + "\");");
+            "Table tabletmp = tableEnv.sqlQuery(\"" + transformProcedure.sql() + "\");");
         composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE,
-            "tmp = tEnv.toDataSet(table, Row.class);");
+            "tmp = tableEnv.toDataSet(tabletmp, Row.class);");
         visitNext(transformProcedure);
     }
 
     @Override
     public void visit(LoadProcedure loadProcedure) {
-        composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE, "tmp.print();\n");
+        composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE, "tmp.print();");
+        composer.handleComposition(ClassBodyComposer.CodeCategory.SENTENCE, "return null;");
         visitNext(loadProcedure);
     }
 

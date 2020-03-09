@@ -27,4 +27,6 @@ nbdist/
 *-journal
 
 /log/
+site/
 
+metastore_db/
